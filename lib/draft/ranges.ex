@@ -8,28 +8,45 @@ defmodule Draft.Ranges do
       def apply_ranges(text, inline_style_ranges, entity_ranges, entity_map, context) do
         inline_style_ranges ++ entity_ranges
         |> consolidate_ranges()
-        |> Enum.reduce(text, fn {start, finish}, acc ->
+        |> Enum.reduce({text, 0}, fn {start, finish}, {acc, range_modifier} ->
           {style_opening_tag, style_closing_tag} =
             case get_styles_for_range(start, finish, inline_style_ranges, context) do
               "" -> {"", ""}
               styles -> {"<span style=\"#{styles}\">", "</span>"}
             end
+          entities = get_entities_for_range(start, finish, entity_ranges, entity_map)
           entity_opening_tags = get_entity_opening_tags_for_start(start, entity_ranges, entity_map, context)
           entity_closing_tags = get_entity_closing_tags_for_finish(finish, entity_ranges, entity_map, context)
           opening_tags = "#{entity_opening_tags}#{style_opening_tag}"
           closing_tags = "#{style_closing_tag}#{entity_closing_tags}"
 
-          adjusted_start = start + String.length(acc) - String.length(text)
-          adjusted_finish = finish + String.length(acc) - String.length(text)
+          adjusted_start = start + range_modifier
+          adjusted_finish = finish + range_modifier
 
-          acc
-          |> String.split_at(adjusted_finish)
-          |> Tuple.to_list
-          |> Enum.join(closing_tags)
-          |> String.split_at(adjusted_start)
-          |> Tuple.to_list
-          |> Enum.join(opening_tags)
+          {chunk_1, content_and_chunk_2} = String.split_at(acc, adjusted_start)
+          {content, chunk_2} = String.split_at(content_and_chunk_2, adjusted_finish - adjusted_start)
+
+          {processed_content, processor_modifier} = Enum.reduce(entities, {content, 0}, fn {entity_range, entity}, {acc, processor_modifier} ->
+            chunk_span = {start - entity_range["offset"], finish - entity_range["offset"], entity_range["length"]}
+            new_content =
+              try do
+                process_entity_chunk(entity, acc, chunk_span, context)
+              rescue
+                FunctionClauseError -> acc
+              end
+
+            {new_content, processor_modifier + String.length(new_content) - String.length(acc)}
+          end)
+
+          {
+            Enum.join([chunk_1, opening_tags, processed_content, closing_tags, chunk_2]),
+            range_modifier + processor_modifier + String.length(opening_tags) + String.length(closing_tags)
+          }
         end)
+        |> elem(0)
+      end
+
+      def process_entity_chunk("foo", "bar", "bar", "baz") do
       end
 
       def process_style("BOLD", _) do
@@ -42,6 +59,12 @@ defmodule Draft.Ranges do
 
       def process_entity(%{"type"=>"LINK","mutability"=>"MUTABLE","data"=>%{"url"=>url}}, _) do
         {"<a href=\"#{url}\">", "</a>"}
+      end
+
+      defp get_entities_for_range(start, finish, entity_ranges, entity_map) do
+        entity_ranges
+        |> Enum.filter(fn range -> is_in_range(range, start, finish) end)
+        |> Enum.map(fn range -> {range, Map.get(entity_map, Integer.to_string(range["key"]))} end)
       end
 
       defp get_styles_for_range(start, finish, inline_style_ranges, context) do

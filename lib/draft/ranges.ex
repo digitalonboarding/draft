@@ -10,7 +10,7 @@ defmodule Draft.Ranges do
         |> divvy_style_ranges(block["entityRanges"])
         |> group_style_ranges()
         |> Kernel.++(block["entityRanges"])
-        |> sort_by_offset_and_length_then_styles_first()
+        |> sort_by_offset_and_length_then_styles_last()
         |> DraftTree.build_tree(block["text"])
         |> DraftTree.process_tree(fn text, styles, key ->
           cond do
@@ -89,7 +89,7 @@ defmodule Draft.Ranges do
         |> List.flatten()
       end
 
-      defp sort_by_offset_and_length_then_styles_first(ranges) do
+      defp sort_by_offset_and_length_then_styles_last(ranges) do
         ranges
         |> Enum.sort(fn range1, range2 ->
           cond do
@@ -100,7 +100,7 @@ defmodule Draft.Ranges do
               range1["length"] >= range2["length"]
 
             true ->
-              is_nil(range2["styles"])
+              !is_nil(range2["styles"])
           end
         end)
       end
